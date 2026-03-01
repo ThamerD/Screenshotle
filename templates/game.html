@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Screenshotle – Guess the game</title>
+  <style>
+    body { font-family: system-ui, sans-serif; max-width: 640px; margin: 2rem auto; padding: 0 1rem; }
+    h1 { font-size: 1.5rem; }
+    img { width: 100%; height: auto; display: block; border-radius: 8px; }
+    .hint { background: #f0f0f0; padding: 0.75rem; border-radius: 6px; margin: 1rem 0; }
+    .message { font-weight: 600; margin: 1rem 0; }
+    form { margin-top: 1rem; }
+    input[type="text"] { width: 100%; padding: 0.5rem; font-size: 1rem; box-sizing: border-box; }
+    button, a.button { display: inline-block; margin-top: 0.5rem; padding: 0.5rem 1rem; background: #333; color: #fff; text-decoration: none; border: none; border-radius: 6px; cursor: pointer; font-size: 1rem; }
+    a.button:hover { opacity: 0.9; }
+    .meta { color: #666; font-size: 0.9rem; margin-top: 0.5rem; }
+  </style>
+</head>
+<body>
+  <h1>Screenshotle</h1>
+  <p class="meta">Attempt {{ attempt_count }} of {{ max_attempts }}</p>
+
+  {% if screenshot_url %}
+  <img src="{{ screenshot_url }}" alt="Game screenshot">
+  {% endif %}
+
+  {% if hint_text %}
+  <div class="hint"><strong>Hint:</strong> {{ hint_text }}</div>
+  {% endif %}
+
+  {% if message %}
+  <div class="message">{{ message }}{% if answer %} The game was <strong>{{ answer }}</strong>.{% endif %}</div>
+  <a href="/play-again" class="button">Play again</a>
+  {% elif show_guess_form %}
+  <form method="post" action="/guess">
+    <label for="guess">Your guess:</label>
+    <input type="text" id="guess" name="guess" placeholder="Game title" required autofocus>
+    <button type="submit">Submit</button>
+  </form>
+  {% endif %}
+</body>
+</html>

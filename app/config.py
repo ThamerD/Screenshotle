@@ -30,12 +30,16 @@ class Config:
     APP_NAME: str = "Screenshotle"
     DEBUG: bool = False
 
+    # Session (signed cookie); required for game state
+    SESSION_SECRET_KEY: str = ""
+
     def __init__(self) -> None:
         self.OPENAI_API_KEY = get_env("OPENAI_API_KEY")
         self.TWITCH_CLIENT_ID = get_env("TWITCH_CLIENT_ID") or get_env("IGDB_CLIENT_ID")
         self.TWITCH_CLIENT_SECRET = get_env("TWITCH_CLIENT_SECRET") or get_env("IGDB_CLIENT_SECRET")
         self.APP_NAME = get_env("APP_NAME", "Screenshotle") or "Screenshotle"
         self.DEBUG = get_env("DEBUG", "").lower() in ("1", "true", "yes")
+        self.SESSION_SECRET_KEY = get_env("SESSION_SECRET_KEY", "") or "dev-secret-change-in-production"
 
     def has_igdb_credentials(self) -> bool:
         """True if Twitch (IGDB) client id and secret are set."""
