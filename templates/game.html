@@ -23,13 +23,16 @@
     #guess-list button:hover { background: #f0f0f0; }
     button[type="submit"], a.button { display: inline-block; margin-top: 0.5rem; padding: 0.5rem 1rem; background: #333; color: #fff; text-decoration: none; border: none; border-radius: 6px; cursor: pointer; font-size: 1rem; }
     a.button:hover { opacity: 0.9; }
-    .button-row { display: flex; flex-wrap: wrap; gap: 0.5rem; margin-top: 0.5rem; align-items: center; }
+    .button-row { display: flex; flex-wrap: wrap; gap: 0.5rem; margin-top: 0.5rem; align-items: center; justify-content: space-between; }
+    .button-row .button-group { display: flex; gap: 0.5rem; align-items: center; }
+    .button-row button,
+    .button-row a.button { margin-top: 0; }
+    .button-row button[type="submit"]:first-of-type { background: #333; color: #fff; }
     a.button-secondary { background: transparent; color: #333; border: 1px solid #999; }
     a.button-secondary:hover { background: #f0f0f0; }
-    form.button-inline { display: inline; margin: 0; }
-    form.button-inline button { margin-top: 0; }
-    form.button-inline button[type="submit"] { background: transparent; color: #333; border: 1px solid #999; }
-    form.button-inline button[type="submit"]:hover { background: #f0f0f0; }
+    form.button-inline { display: inline-flex; margin: 0; align-items: center; }
+    form.button-inline button { margin: 0; padding: 0.5rem 1rem; font-size: 1rem; border-radius: 6px; cursor: pointer; background: transparent; color: #333; border: 1px solid #999; }
+    form.button-inline button:hover { background: #f0f0f0; }
     .meta { color: #666; font-size: 0.9rem; margin-top: 0.5rem; }
   </style>
 </head>
@@ -57,20 +60,22 @@
   <div class="message">{{ message }}{% if answer %} The game was <strong>{{ answer }}</strong>.{% endif %}</div>
   <a href="/play-again" class="button">Play again</a>
   {% elif show_guess_form %}
-  <form method="post" action="/guess" id="guess-form" autocomplete="off">
+  <form id="guess-form" method="post" action="/guess" autocomplete="off">
     <label for="guess">Your guess:</label>
     <div class="guess-wrap">
       <input type="text" id="guess" name="guess" placeholder="Game title" required autofocus autocomplete="off">
       <div id="guess-list" role="listbox"></div>
     </div>
-    <div class="button-row">
-      <button type="submit">Submit</button>
+  </form>
+  <div class="button-row">
+    <button type="submit" form="guess-form">Submit</button>
+    <div class="button-group">
       <form method="post" action="/skip-guess" class="button-inline">
         <button type="submit">Skip guess</button>
       </form>
       <a href="/skip-game" class="button button-secondary">Skip game</a>
     </div>
-  </form>
+  </div>
   <script>
     (function() {
       var gameNames = {{ (game_names or []) | tojson }};
