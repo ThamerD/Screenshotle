@@ -2,7 +2,8 @@
 Game routes: new game, submit guess, play again. Render Jinja2; read/write session.
 """
 
-import time
+from datetime import datetime
+from zoneinfo import ZoneInfo
 from typing import Any
 
 import requests
@@ -17,10 +18,15 @@ from app.routes.session_serializer import dict_to_game_session, game_session_to_
 # Max wrong guesses before game over (then show next screenshot; repeat until correct or this many attempts)
 MAX_ATTEMPTS = 5
 
-# Cache the game pool from IGDB; refresh only when older than this (seconds)
-GAME_POOL_CACHE_MAX_AGE_SECONDS = 7 * 24 * 3600  # 7 days
+# Cache the game pool from IGDB; refresh when a new calendar day starts in PST (America/Los_Angeles)
+PST = ZoneInfo("America/Los_Angeles")
 # IGDB allows max 500 items per request (api-docs.igdb.com)
 GAME_POOL_LIMIT = 500
+
+
+def _pst_date_string() -> str:
+    """Current calendar date in PST (e.g. '2025-02-28'). Used to invalidate cache at start of each PST day."""
+    return datetime.now(PST).strftime("%Y-%m-%d")
 # Templates at project root / templates
 TEMPLATES_DIR = Path(__file__).resolve().parent.parent.parent / "templates"
 templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
@@ -113,22 +119,22 @@ async def game_page(request: Request) -> Any:
 
 def _get_or_fetch_game_pool(request: Request):
     """
-    Return the game pool from app.state cache if fresh (< 7 days), else fetch from IGDB and update cache.
+    Return the game pool from app.state cache if still valid for the current PST day, else fetch from IGDB and update cache.
     Requires request.app.state.game_service to be set. Returns list of Game (may be empty).
     """
     service = _get_game_service(request)
     if not service:
         return None
-    now = time.time()
+    today_pst = _pst_date_string()
     cache = getattr(request.app.state, "game_pool_cache", None)
     if cache is not None:
-        pool, fetched_at = cache
-        if (now - fetched_at) < GAME_POOL_CACHE_MAX_AGE_SECONDS:
-            print(f"[Screenshotle] Game pool: using cache ({len(pool)} games)")
+        pool, cached_pst_date = cache
+        if cached_pst_date == today_pst:
+            print(f"[Screenshotle] Game pool: using cache ({len(pool)} games, PST date {today_pst})")
             return pool
-    print("[Screenshotle] Game pool: fetching from IGDB...")
+    print(f"[Screenshotle] Game pool: fetching from IGDB (new PST day: {today_pst})...")
     pool = service.get_game_pool(limit=GAME_POOL_LIMIT)
-    request.app.state.game_pool_cache = (pool, now)
+    request.app.state.game_pool_cache = (pool, today_pst)
     print(f"[Screenshotle] Game pool: fetched {len(pool)} games from IGDB")
     return pool
 
@@ -136,7 +142,7 @@ def _get_or_fetch_game_pool(request: Request):
 @game_router.get("/new-game", response_class=HTMLResponse)
 async def new_game(request: Request) -> Any:
     """
-    Start a new round: use cached game pool (refresh from IGDB if older than 7 days), pick random game, save session, redirect to game page.
+    Start a new round: use cached game pool (refresh from IGDB when a new day starts in PST), pick random game, save session, render game page.
     If service is missing or pool is empty, show an error page instead of redirecting (avoids redirect loop).
     """
     service = _get_game_service(request)
