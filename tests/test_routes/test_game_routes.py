@@ -111,7 +111,7 @@ def test_new_game_uses_cache_when_fresh(app_with_mock_service, client, mock_game
     response = client.get("/new-game", follow_redirects=False)
     assert response.status_code == 200
     mock_game_service.get_game_pool.assert_not_called()
-    mock_game_service.start_new_game.assert_called_once_with([sample_game], exclude_ids=set())
+    mock_game_service.start_new_game.assert_called_once_with([sample_game])
 
 
 def test_new_game_refetches_when_cache_stale(app_with_mock_service, client, mock_game_service, sample_game):

@@ -19,6 +19,10 @@ IGDB_SCREENSHOTS = f"{IGDB_BASE}/screenshots"
 IGDB_IMAGE_URL_TEMPLATE = "https://images.igdb.com/igdb/image/upload/t_screenshot_big/{image_id}.jpg"
 # IGDB max items per request (documented at api-docs.igdb.com)
 PAGE_SIZE = 500
+# Fetch games in batches of this size (smaller = more requests but spreads load)
+BATCH_SIZE = 100
+# Only include games that have at least this many resolved screenshot URLs
+MIN_SCREENSHOTS_PER_GAME = 5
 RATE_LIMIT_DELAY = 0.3
 
 
@@ -74,67 +78,70 @@ class IGDBClient:
 
     def get_popular_games(self, limit: int = 500) -> list[dict[str, Any]]:
         """
-        Fetch popular games (by total_rating_count) with genres and screenshot URLs.
+        Fetch popular games in batches; only include games with at least MIN_SCREENSHOTS_PER_GAME screenshots.
         Returns list of dicts: id, name, genres (list[str]), first_release_date (int|None), screenshot_urls (list[str]).
-        IGDB allows max 500 items per request; higher values can cause 403.
         """
-        limit = min(limit, PAGE_SIZE)
         genre_map = self.get_genre_map()
-        time.sleep(RATE_LIMIT_DELAY)
-
-        # Fetch games with screenshot IDs (screenshots field returns list of screenshot record ids)
-        body = (
-            "fields id,name,first_release_date,genres,screenshots; "
-            "sort total_rating_count desc; "
-            f"limit {limit}; "
-            "where screenshots != null & first_release_date != null;"
-        )
-        r = requests.post(IGDB_GAMES, headers=self._igdb_headers(), data=body)
-        r.raise_for_status()
-        games_raw = r.json()
-        if not games_raw:
-            return []
-
-        # Collect all screenshot IDs and fetch image_id for each
-        screenshot_ids: list[int] = []
-        for g in games_raw:
-            screenshot_ids.extend(g.get("screenshots") or [])
-        screenshot_ids = list(dict.fromkeys(screenshot_ids))  # unique, preserve order
-
-        # IGDB allows up to 500 ids in a where clause; batch if needed
-        id_to_image_id: dict[int, str] = {}
-        for i in range(0, len(screenshot_ids), 500):
-            batch = screenshot_ids[i : i + 500]
-            time.sleep(RATE_LIMIT_DELAY)
-            ids_str = ",".join(str(x) for x in batch)
-            r2 = requests.post(
-                IGDB_SCREENSHOTS,
-                headers=self._igdb_headers(),
-                data=f"fields image_id; where id = ({ids_str});",
-            )
-            r2.raise_for_status()
-            for s in r2.json():
-                sid = s.get("id")
-                img = s.get("image_id")
-                if sid is not None and img is not None:
-                    id_to_image_id[sid] = str(img)
-
-        # Build result: each game gets id, name, genres (names), first_release_date, screenshot_urls
         result: list[dict[str, Any]] = []
-        for g in games_raw:
-            genre_ids = g.get("genres") or []
-            genre_names = [genre_map.get(i, str(i)) for i in genre_ids]
-            screen_ids = g.get("screenshots") or []
-            urls = [
-                IGDB_IMAGE_URL_TEMPLATE.format(image_id=id_to_image_id[sid])
-                for sid in screen_ids
-                if sid in id_to_image_id
-            ]
-            result.append({
-                "id": g["id"],
-                "name": g["name"],
-                "genres": genre_names,
-                "first_release_date": g.get("first_release_date"),
-                "screenshot_urls": urls,
-            })
+        offset = 0
+        while len(result) < limit:
+            time.sleep(RATE_LIMIT_DELAY)
+            fetch_size = BATCH_SIZE
+            body = (
+                "fields id,name,first_release_date,genres,screenshots; "
+                "sort total_rating_count desc; "
+                f"limit {fetch_size}; "
+                f"offset {offset}; "
+                "where screenshots != null & first_release_date != null;"
+            )
+            r = requests.post(IGDB_GAMES, headers=self._igdb_headers(), data=body)
+            r.raise_for_status()
+            games_raw = r.json()
+            if not games_raw:
+                break
+
+            # Resolve screenshot image_ids for this batch
+            screenshot_ids: list[int] = []
+            for g in games_raw:
+                screenshot_ids.extend(g.get("screenshots") or [])
+            screenshot_ids = list(dict.fromkeys(screenshot_ids))
+            id_to_image_id: dict[int, str] = {}
+            for i in range(0, len(screenshot_ids), PAGE_SIZE):
+                batch = screenshot_ids[i : i + PAGE_SIZE]
+                time.sleep(RATE_LIMIT_DELAY)
+                ids_str = ",".join(str(x) for x in batch)
+                r2 = requests.post(
+                    IGDB_SCREENSHOTS,
+                    headers=self._igdb_headers(),
+                    data=f"fields image_id; where id = ({ids_str});",
+                )
+                r2.raise_for_status()
+                for s in r2.json():
+                    sid = s.get("id")
+                    img = s.get("image_id")
+                    if sid is not None and img is not None:
+                        id_to_image_id[sid] = str(img)
+
+            for g in games_raw:
+                genre_ids = g.get("genres") or []
+                genre_names = [genre_map.get(i, str(i)) for i in genre_ids]
+                screen_ids = g.get("screenshots") or []
+                urls = [
+                    IGDB_IMAGE_URL_TEMPLATE.format(image_id=id_to_image_id[sid])
+                    for sid in screen_ids
+                    if sid in id_to_image_id
+                ]
+                if len(urls) >= MIN_SCREENSHOTS_PER_GAME:
+                    result.append({
+                        "id": g["id"],
+                        "name": g["name"],
+                        "genres": genre_names,
+                        "first_release_date": g.get("first_release_date"),
+                        "screenshot_urls": urls,
+                    })
+                    if len(result) >= limit:
+                        break
+            offset += len(games_raw)
+            if offset >= 5000:
+                break
         return result

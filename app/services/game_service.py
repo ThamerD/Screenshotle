@@ -71,24 +71,11 @@ class GameService:
         raw_list = self._igdb.get_popular_games(limit=limit)
         return [raw_dict_to_game(r) for r in raw_list]
 
-    def start_new_game(
-        self, pool: list[Game], exclude_ids: set[int] | None = None
-    ) -> GameSession:
-        """
-        Pick a random game from the pool (only games with screenshots).
-        If exclude_ids is set, prefer games not in that set to reduce repetition; fall back to full pool if none left.
-        """
-        with_screenshots = [g for g in pool if g.screenshot_urls]
-        if not with_screenshots:
+    def start_new_game(self, pool: list[Game]) -> GameSession:
+        """Pick a random game from the pool (pool is expected to have only games with enough screenshots)."""
+        if not pool:
             return GameSession(current_game=None, screenshot_index=0, attempt_count=0)
-        candidates = (
-            [g for g in with_screenshots if g.id not in (exclude_ids or set())]
-            if exclude_ids
-            else with_screenshots
-        )
-        if not candidates:
-            candidates = with_screenshots
-        game = random.choice(candidates)
+        game = random.choice(pool)
         return GameSession(current_game=game, screenshot_index=0, attempt_count=0)
 
     def get_current_screenshot_url(self, session: GameSession) -> str | None:
