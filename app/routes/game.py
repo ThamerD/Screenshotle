@@ -101,7 +101,7 @@ def _get_or_fetch_game_pool(request: Request):
     cache = getattr(request.app.state, "game_pool_cache", None)
     if cache is not None:
         pool, fetched_at = cache
-        if (now - fetched_at) < GAME_POOL_CACHE_MAX_AGE_SECONDS and pool:
+        if (now - fetched_at) < GAME_POOL_CACHE_MAX_AGE_SECONDS:
             return pool
     pool = service.get_game_pool(limit=GAME_POOL_LIMIT)
     request.app.state.game_pool_cache = (pool, now)
@@ -126,7 +126,6 @@ async def new_game(request: Request) -> Any:
         pool = _get_or_fetch_game_pool(request)
     except requests.RequestException as e:
         status = getattr(getattr(e, "response", None), "status_code", None)
-        print(f"[Screenshotle] /new-game: IGDB request failed — {type(e).__name__} status={status}")
         if status == 403:
             msg = "IGDB returned 403 Forbidden. Check your Twitch Client ID and Secret (and that the app is approved for IGDB)."
         elif status:
@@ -138,7 +137,6 @@ async def new_game(request: Request) -> Any:
             status_code=503,
         )
     if pool is None:
-        print("[Screenshotle] /new-game: pool is None")
         return HTMLResponse(
             "<h1>Configuration error</h1><p>Game service not available.</p>"
             "<p><a href=\"/new-game\">Try again</a></p>",
@@ -146,7 +144,6 @@ async def new_game(request: Request) -> Any:
         )
     gs = service.start_new_game(pool)
     if gs.current_game is None:
-        print(f"[Screenshotle] /new-game: pool empty (len={len(pool)}), cannot start game")
         return HTMLResponse(
             "<h1>No games loaded</h1><p>Could not load games from IGDB (pool is empty). "
             "Check your Twitch/IGDB credentials and that the API is reachable.</p>"
