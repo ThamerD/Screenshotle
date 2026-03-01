@@ -72,8 +72,8 @@ def test_get_popular_games_returns_list_with_screenshot_urls(client):
         screens_resp.raise_for_status = MagicMock()
         games_empty = MagicMock(status_code=200, json=lambda: [])
         games_empty.raise_for_status = MagicMock()
-        # Call order: get_genre_map, games batch 1, screenshots batch, games batch 2 (empty, stops loop)
-        mock_post.side_effect = [genre_resp, games_resp, screens_resp, games_empty]
+        # Call order: get_genre_map, popular stream (games, screenshots, games empty), recent stream (games empty)
+        mock_post.side_effect = [genre_resp, games_resp, screens_resp, games_empty, games_empty]
 
         with patch("time.sleep"):
             result = client.get_popular_games(limit=10)
@@ -99,9 +99,10 @@ def test_get_popular_games_empty_when_no_games(client):
     with patch("requests.post") as mock_post:
         genre_resp = MagicMock(status_code=200, json=lambda: [])
         genre_resp.raise_for_status = MagicMock()
-        games_resp = MagicMock(status_code=200, json=lambda: [])
-        games_resp.raise_for_status = MagicMock()
-        mock_post.side_effect = [genre_resp, games_resp]
+        games_empty = MagicMock(status_code=200, json=lambda: [])
+        games_empty.raise_for_status = MagicMock()
+        # get_genre_map, popular (empty), recent (empty)
+        mock_post.side_effect = [genre_resp, games_empty, games_empty]
         with patch("time.sleep"):
             result = client.get_popular_games(limit=10)
         assert result == []

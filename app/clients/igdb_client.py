@@ -21,8 +21,10 @@ IGDB_IMAGE_URL_TEMPLATE = "https://images.igdb.com/igdb/image/upload/t_screensho
 PAGE_SIZE = 500
 # Fetch games in batches of this size (smaller = more requests but spreads load)
 BATCH_SIZE = 100
-# Only include games that have at least this many resolved screenshot URLs
+# Only include games that have at least this many resolved screenshot URLs (from /screenshots image_id lookup)
 MIN_SCREENSHOTS_PER_GAME = 5
+# Unix timestamp for 2020-01-01 00:00:00 UTC (for "recent games" filter)
+RELEASE_DATE_2020 = 1577836800
 RATE_LIMIT_DELAY = 0.3
 
 
@@ -76,23 +78,28 @@ class IGDBClient:
         r.raise_for_status()
         return {g["id"]: g["name"] for g in r.json()}
 
-    def get_popular_games(self, limit: int = 500) -> list[dict[str, Any]]:
+    def _fetch_games_stream(
+        self,
+        genre_map: dict[int, str],
+        where_clause: str,
+        sort_clause: str,
+        target_count: int,
+        max_offset: int = 5000,
+    ) -> list[dict[str, Any]]:
         """
-        Fetch popular games in batches; only include games with at least MIN_SCREENSHOTS_PER_GAME screenshots.
-        Returns list of dicts: id, name, genres (list[str]), first_release_date (int|None), screenshot_urls (list[str]).
+        Fetch games in batches with the given where/sort; include only games with >= MIN_SCREENSHOTS_PER_GAME resolved URLs.
+        Returns list of game dicts (id, name, genres, first_release_date, screenshot_urls).
         """
-        genre_map = self.get_genre_map()
         result: list[dict[str, Any]] = []
         offset = 0
-        while len(result) < limit:
+        while len(result) < target_count and offset < max_offset:
             time.sleep(RATE_LIMIT_DELAY)
-            fetch_size = BATCH_SIZE
             body = (
-                "fields id,name,first_release_date,genres,screenshots; "
-                "sort total_rating_count desc; "
-                f"limit {fetch_size}; "
+                "fields id,name,first_release_date,genres,screenshots,total_rating_count; "
+                f"sort {sort_clause}; "
+                f"limit {BATCH_SIZE}; "
                 f"offset {offset}; "
-                "where screenshots != null & first_release_date != null;"
+                f"where {where_clause};"
             )
             r = requests.post(IGDB_GAMES, headers=self._igdb_headers(), data=body)
             r.raise_for_status()
@@ -100,8 +107,7 @@ class IGDBClient:
             if not games_raw:
                 break
 
-            # Resolve screenshot image_ids for this batch
-            screenshot_ids: list[int] = []
+            screenshot_ids = []
             for g in games_raw:
                 screenshot_ids.extend(g.get("screenshots") or [])
             screenshot_ids = list(dict.fromkeys(screenshot_ids))
@@ -113,7 +119,7 @@ class IGDBClient:
                 r2 = requests.post(
                     IGDB_SCREENSHOTS,
                     headers=self._igdb_headers(),
-                    data=f"fields image_id; where id = ({ids_str});",
+                    data=f"fields image_id; where id = ({ids_str}); limit {PAGE_SIZE};",
                 )
                 r2.raise_for_status()
                 for s in r2.json():
@@ -137,11 +143,44 @@ class IGDBClient:
                         "name": g["name"],
                         "genres": genre_names,
                         "first_release_date": g.get("first_release_date"),
+                        "total_rating_count": g.get("total_rating_count"),
                         "screenshot_urls": urls,
                     })
-                    if len(result) >= limit:
+                    if len(result) >= target_count:
                         break
             offset += len(games_raw)
-            if offset >= 5000:
-                break
+        return result
+
+    def get_popular_games(self, limit: int = 500) -> list[dict[str, Any]]:
+        """
+        Fetch a mix of (1) all-time popular games and (2) recent games (2020+), each with >= MIN_SCREENSHOTS_PER_GAME screenshots.
+        Merges and dedupes by id (popular first, then recent). Returns list of dicts: id, name, genres, first_release_date, screenshot_urls.
+        """
+        genre_map = self.get_genre_map()
+        half = max(1, limit // 2)
+        base_where = "screenshots != null & first_release_date != null & total_rating_count != null"
+
+        popular = self._fetch_games_stream(
+            genre_map,
+            where_clause=base_where,
+            sort_clause="total_rating_count desc",
+            target_count=half,
+            max_offset=5000,
+        )
+        recent = self._fetch_games_stream(
+            genre_map,
+            where_clause=f"{base_where} & first_release_date >= {RELEASE_DATE_2020}",
+            sort_clause="first_release_date desc",
+            target_count=half,
+            max_offset=3000,
+        )
+
+        seen_ids: set[int] = set()
+        result: list[dict[str, Any]] = []
+        for g in popular + recent:
+            if g["id"] not in seen_ids:
+                seen_ids.add(g["id"])
+                result.append(g)
+                if len(result) >= limit:
+                    break
         return result
