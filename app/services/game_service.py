@@ -4,6 +4,7 @@ Gameplay logic: pick random game, map release date to Generation, session state,
 Depends on app.models and app.clients. No HTTP or session storage; callers (routes) own session.
 """
 
+import re
 import random
 from datetime import datetime, timezone
 from typing import Any
@@ -70,11 +71,24 @@ class GameService:
         raw_list = self._igdb.get_popular_games(limit=limit)
         return [raw_dict_to_game(r) for r in raw_list]
 
-    def start_new_game(self, pool: list[Game]) -> GameSession:
-        """Pick a random game from the pool and return a new GameSession (screenshot_index=0, attempt_count=0)."""
-        if not pool:
+    def start_new_game(
+        self, pool: list[Game], exclude_ids: set[int] | None = None
+    ) -> GameSession:
+        """
+        Pick a random game from the pool (only games with screenshots).
+        If exclude_ids is set, prefer games not in that set to reduce repetition; fall back to full pool if none left.
+        """
+        with_screenshots = [g for g in pool if g.screenshot_urls]
+        if not with_screenshots:
             return GameSession(current_game=None, screenshot_index=0, attempt_count=0)
-        game = random.choice(pool)
+        candidates = (
+            [g for g in with_screenshots if g.id not in (exclude_ids or set())]
+            if exclude_ids
+            else with_screenshots
+        )
+        if not candidates:
+            candidates = with_screenshots
+        game = random.choice(candidates)
         return GameSession(current_game=game, screenshot_index=0, attempt_count=0)
 
     def get_current_screenshot_url(self, session: GameSession) -> str | None:
@@ -84,9 +98,10 @@ class GameService:
         idx = min(session.screenshot_index, len(session.current_game.screenshot_urls) - 1)
         return session.current_game.screenshot_urls[idx]
 
-    def submit_guess(self, session: GameSession, guess: str) -> HintResult:
+    def submit_guess(self, session: GameSession, guess: str, pool: list[Game] | None = None) -> HintResult:
         """
-        Check the guess against the correct game and return HintResult (correct flag + optional hint).
+        Check the guess against the correct game and return HintResult (correct flag + hints).
+        If pool is provided and guess is wrong, compute genre_match and generation_match_text.
         Does not mutate session; caller should update attempt_count and screenshot_index.
         """
         if session.current_game is None:
@@ -97,4 +112,66 @@ class GameService:
             generation=session.current_game.generation,
             genres=session.current_game.genres,
         )
-        return self._openai.check_guess_and_get_hint(request)
+        result = self._openai.check_guess_and_get_hint(request)
+        if result.correct or not pool:
+            return result
+        guessed_game = _find_game_by_name(pool, request.guess)
+        if guessed_game is None:
+            return result
+        correct_genres = set(session.current_game.genres)
+        guess_genres_list = list(dict.fromkeys(guessed_game.genres))  # preserve order, no dupes
+        genre_matches = [g for g in guess_genres_list if g in correct_genres]
+        genre_mismatches = [g for g in guess_genres_list if g not in correct_genres]
+        cgen = session.current_game.generation
+        ggen = guessed_game.generation
+        generation_text = None
+        generation_matched = False
+        if ggen:
+            generation_text = f"{ggen.label} ({', '.join(ggen.primary_consoles)})"
+            generation_matched = cgen is not None and cgen.label == ggen.label
+        return HintResult(
+            correct=result.correct,
+            hint_text=result.hint_text,
+            genre_matches=genre_matches,
+            genre_mismatches=genre_mismatches,
+            generation_text=generation_text,
+            generation_matched=generation_matched,
+        )
+
+
+def _normalize_for_match(s: str) -> str:
+    """Lowercase, strip, remove leading 'the ', collapse spaces."""
+    s = s.strip().lower()
+    if s.startswith("the "):
+        s = s[4:].strip()
+    return " ".join(s.split())
+
+
+def _words(s: str) -> set[str]:
+    """Alphanumeric words (digits allowed) for overlap matching."""
+    return set(re.findall(r"[a-z0-9]+", s.lower()))
+
+
+def _find_game_by_name(pool: list[Game], guess: str) -> Game | None:
+    """Return a game from the pool whose name matches guess (exact, substring, or word overlap)."""
+    g = _normalize_for_match(guess)
+    if not g:
+        return None
+    g_name = g.replace(":", "").replace("-", " ")
+    for game in pool:
+        n = _normalize_for_match(game.name)
+        if n == g_name:
+            return game
+    for game in pool:
+        n = _normalize_for_match(game.name)
+        if g_name in n or n in g_name:
+            return game
+    # Word overlap: guess words all appear in game name (or vice versa for short names)
+    guess_words = _words(guess)
+    if not guess_words:
+        return None
+    for game in pool:
+        name_words = _words(game.name)
+        if guess_words <= name_words or (len(guess_words) >= 2 and name_words <= guess_words):
+            return game
+    return None

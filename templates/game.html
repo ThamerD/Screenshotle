@@ -9,10 +9,19 @@
     h1 { font-size: 1.5rem; }
     img { width: 100%; height: auto; display: block; border-radius: 8px; }
     .hint { background: #f0f0f0; padding: 0.75rem; border-radius: 6px; margin: 1rem 0; }
+    .hint-badges { display: flex; flex-wrap: wrap; gap: 0.5rem; margin: 0.5rem 0; }
+    .hint-badge { display: inline-block; padding: 0.35rem 0.65rem; border-radius: 6px; color: #fff; font-size: 0.9rem; }
+    .hint-badge.match { background: #0d7d3d; }
+    .hint-badge.mismatch { background: #b91c1c; }
     .message { font-weight: 600; margin: 1rem 0; }
     form { margin-top: 1rem; }
+    .guess-wrap { position: relative; }
     input[type="text"] { width: 100%; padding: 0.5rem; font-size: 1rem; box-sizing: border-box; }
-    button, a.button { display: inline-block; margin-top: 0.5rem; padding: 0.5rem 1rem; background: #333; color: #fff; text-decoration: none; border: none; border-radius: 6px; cursor: pointer; font-size: 1rem; }
+    #guess-list { position: absolute; left: 0; right: 0; top: 100%; z-index: 10; max-height: 220px; overflow-y: auto; background: #fff; border: 1px solid #ccc; border-radius: 6px; box-shadow: 0 4px 12px rgba(0,0,0,0.15); display: none; }
+    #guess-list.show { display: block; }
+    #guess-list button { display: block; width: 100%; padding: 0.5rem 0.75rem; text-align: left; border: none; background: none; cursor: pointer; font-size: 1rem; }
+    #guess-list button:hover { background: #f0f0f0; }
+    button[type="submit"], a.button { display: inline-block; margin-top: 0.5rem; padding: 0.5rem 1rem; background: #333; color: #fff; text-decoration: none; border: none; border-radius: 6px; cursor: pointer; font-size: 1rem; }
     a.button:hover { opacity: 0.9; }
     .meta { color: #666; font-size: 0.9rem; margin-top: 0.5rem; }
   </style>
@@ -25,6 +34,14 @@
   <img src="{{ screenshot_url }}" alt="Game screenshot">
   {% endif %}
 
+  {% if genre_matches or genre_mismatches or generation_text %}
+  <div class="hint-badges">
+    {% for g in genre_matches or [] %}<span class="hint-badge match">Genre: {{ g }}</span>{% endfor %}
+    {% for g in genre_mismatches or [] %}<span class="hint-badge mismatch">Genre: {{ g }}</span>{% endfor %}
+    {% if generation_text %}<span class="hint-badge {{ 'match' if generation_matched else 'mismatch' }}">Era: {{ generation_text }}</span>{% endif %}
+  </div>
+  {% endif %}
+
   {% if hint_text %}
   <div class="hint"><strong>Hint:</strong> {{ hint_text }}</div>
   {% endif %}
@@ -33,11 +50,43 @@
   <div class="message">{{ message }}{% if answer %} The game was <strong>{{ answer }}</strong>.{% endif %}</div>
   <a href="/play-again" class="button">Play again</a>
   {% elif show_guess_form %}
-  <form method="post" action="/guess">
+  <form method="post" action="/guess" id="guess-form" autocomplete="off">
     <label for="guess">Your guess:</label>
-    <input type="text" id="guess" name="guess" placeholder="Game title" required autofocus>
+    <div class="guess-wrap">
+      <input type="text" id="guess" name="guess" placeholder="Game title" required autofocus autocomplete="off">
+      <div id="guess-list" role="listbox"></div>
+    </div>
     <button type="submit">Submit</button>
   </form>
+  <script>
+    (function() {
+      var gameNames = {{ (game_names or []) | tojson }};
+      var input = document.getElementById('guess');
+      var list = document.getElementById('guess-list');
+      var form = document.getElementById('guess-form');
+      function showMatches() {
+        var q = (input.value || '').trim().toLowerCase();
+        list.textContent = '';
+        if (q.length < 2) { list.classList.remove('show'); return; }
+        var matches = gameNames.filter(function(n) { return n.toLowerCase().indexOf(q) !== -1; }).slice(0, 12);
+        if (matches.length === 0) { list.classList.remove('show'); return; }
+        matches.forEach(function(name) {
+          var btn = document.createElement('button');
+          btn.type = 'button';
+          btn.textContent = name;
+          btn.addEventListener('click', function() { input.value = name; list.classList.remove('show'); });
+          list.appendChild(btn);
+        });
+        list.classList.add('show');
+      }
+      function hideList(e) {
+        if (!list.contains(e.target) && e.target !== input) list.classList.remove('show');
+      }
+      input.addEventListener('input', showMatches);
+      input.addEventListener('focus', showMatches);
+      document.addEventListener('click', hideList);
+    })();
+  </script>
   {% endif %}
 </body>
 </html>

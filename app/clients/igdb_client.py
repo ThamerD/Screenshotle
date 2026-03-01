@@ -72,18 +72,6 @@ class IGDBClient:
         r.raise_for_status()
         return {g["id"]: g["name"] for g in r.json()}
 
-    def probe_games_endpoint(self) -> None:
-        """
-        Minimal POST to /games to verify endpoint access (e.g. some apps get 403 on /games but not /genres).
-        Raises on non-2xx. Use at startup to fail fast with a clear message.
-        """
-        r = requests.post(
-            IGDB_GAMES,
-            headers=self._igdb_headers(),
-            data="fields id,name; limit 1;",
-        )
-        r.raise_for_status()
-
     def get_popular_games(self, limit: int = 500) -> list[dict[str, Any]]:
         """
         Fetch popular games (by total_rating_count) with genres and screenshot URLs.

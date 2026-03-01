@@ -4,7 +4,7 @@ Data schemas: dataclasses for game, session, and hint flow.
 All fields are plain data; no ORM or external calls.
 """
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 
 @dataclass(frozen=True)
@@ -53,7 +53,11 @@ class HintRequest:
 
 @dataclass
 class HintResult:
-    """Result of checking a guess: whether it was correct and optional hint text."""
+    """Result of checking a guess: correct flag, general hint, and genre/era hints (green=match, red=mismatch)."""
 
     correct: bool
     hint_text: str | None = None
+    genre_matches: list[str] = field(default_factory=list)  # guessed game's genres that match correct → show green
+    genre_mismatches: list[str] = field(default_factory=list)  # guessed game's genres that don't match → show red
+    generation_text: str | None = None  # guessed game's era text (e.g. "Eighth generation (PS4, ...)")
+    generation_matched: bool = False  # True → show generation_text in green, False → red
