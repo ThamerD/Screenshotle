@@ -51,7 +51,8 @@ class OpenAIClient:
         content = (response.choices[0].message.content or "").strip()
         lines = [l.strip() for l in content.split("\n") if l.strip()]
         first_line_upper = (lines[0].upper() if lines else "")
-        correct = "CORRECT" in first_line_upper
+        # Word-boundary check: "CORRECT" as a whole word, not substring of "INCORRECT"
+        correct = "CORRECT" in first_line_upper.split()
         hint_text = None
         if not correct and len(lines) >= 2:
             hint_text = lines[1].strip()

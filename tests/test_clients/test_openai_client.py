@@ -53,6 +53,21 @@ def test_check_guess_and_get_hint_returns_incorrect_with_hint(client, hint_reque
         assert result.hint_text == "Think eighth generation, action-adventure."
 
 
+def test_check_guess_and_get_hint_incorrect_not_matched_as_correct(client, hint_request):
+    """INCORRECT contains CORRECT as substring; must not be treated as correct."""
+    with patch("openai.OpenAI") as mock_openai_class:
+        mock_client = MagicMock()
+        mock_openai_class.return_value = mock_client
+        mock_client.chat.completions.create.return_value = MagicMock(
+            choices=[
+                MagicMock(message=MagicMock(content="INCORRECT\nTry a different genre."))
+            ]
+        )
+        result = client.check_guess_and_get_hint(hint_request)
+        assert result.correct is False
+        assert result.hint_text == "Try a different genre."
+
+
 def test_check_guess_and_get_hint_handles_empty_content(client, hint_request):
     with patch("openai.OpenAI") as mock_openai_class:
         mock_client = MagicMock()
