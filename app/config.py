@@ -9,8 +9,14 @@ import os
 
 
 def get_env(key: str, default: str | None = None) -> str | None:
-    """Return the value of an environment variable, or default if unset."""
-    return os.environ.get(key, default)
+    """Return the value of an environment variable, stripped and unquoted, or default if unset."""
+    raw = os.environ.get(key, default)
+    if raw is None or raw == "":
+        return default
+    raw = raw.strip()
+    if len(raw) >= 2 and (raw[0], raw[-1]) in (('"', '"'), ("'", "'")):
+        raw = raw[1:-1].strip()
+    return raw or default
 
 
 class Config:
