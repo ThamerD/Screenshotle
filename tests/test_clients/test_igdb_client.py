@@ -54,7 +54,7 @@ def test_get_popular_games_returns_list_with_screenshot_urls(client):
                     "name": "Test Game",
                     "first_release_date": 1609459200,
                     "genres": [12],
-                    "screenshots": [500, 501],
+                    "screenshots": [500, 501, 502, 503, 504],
                 }
             ],
         )
@@ -64,10 +64,16 @@ def test_get_popular_games_returns_list_with_screenshot_urls(client):
             json=lambda: [
                 {"id": 500, "image_id": "sc5abc"},
                 {"id": 501, "image_id": "sc6def"},
+                {"id": 502, "image_id": "sc7ghi"},
+                {"id": 503, "image_id": "sc8jkl"},
+                {"id": 504, "image_id": "sc9mno"},
             ],
         )
         screens_resp.raise_for_status = MagicMock()
-        mock_post.side_effect = [genre_resp, games_resp, screens_resp]
+        games_empty = MagicMock(status_code=200, json=lambda: [])
+        games_empty.raise_for_status = MagicMock()
+        # Call order: get_genre_map, games batch 1, screenshots batch, games batch 2 (empty, stops loop)
+        mock_post.side_effect = [genre_resp, games_resp, screens_resp, games_empty]
 
         with patch("time.sleep"):
             result = client.get_popular_games(limit=10)
@@ -78,9 +84,13 @@ def test_get_popular_games_returns_list_with_screenshot_urls(client):
         assert g["name"] == "Test Game"
         assert g["genres"] == ["Adventure"]
         assert g["first_release_date"] == 1609459200
+        assert len(g["screenshot_urls"]) >= 5
         assert g["screenshot_urls"] == [
             IGDB_IMAGE_URL_TEMPLATE.format(image_id="sc5abc"),
             IGDB_IMAGE_URL_TEMPLATE.format(image_id="sc6def"),
+            IGDB_IMAGE_URL_TEMPLATE.format(image_id="sc7ghi"),
+            IGDB_IMAGE_URL_TEMPLATE.format(image_id="sc8jkl"),
+            IGDB_IMAGE_URL_TEMPLATE.format(image_id="sc9mno"),
         ]
 
 
