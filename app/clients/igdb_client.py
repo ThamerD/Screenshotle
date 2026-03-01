@@ -17,6 +17,7 @@ IGDB_GENRES = f"{IGDB_BASE}/genres"
 IGDB_SCREENSHOTS = f"{IGDB_BASE}/screenshots"
 # Image URL template: image_id from screenshot record (e.g. "sc5abc" or numeric)
 IGDB_IMAGE_URL_TEMPLATE = "https://images.igdb.com/igdb/image/upload/t_screenshot_big/{image_id}.jpg"
+# IGDB max items per request (documented at api-docs.igdb.com)
 PAGE_SIZE = 500
 RATE_LIMIT_DELAY = 0.3
 
@@ -40,6 +41,13 @@ class IGDBClient:
             "Authorization": f"Bearer {self._token}",
         }
 
+    def _igdb_headers(self) -> dict[str, str]:
+        """Headers for IGDB API: auth plus Accept and Content-Type for Apicalypse body."""
+        h = self._headers()
+        h["Accept"] = "application/json"
+        h["Content-Type"] = "text/plain"
+        return h
+
     def get_token(self) -> str:
         """Get Twitch OAuth2 access token (client credentials)."""
         r = requests.post(
@@ -58,17 +66,31 @@ class IGDBClient:
         """Fetch all genres from IGDB; return mapping id -> name."""
         r = requests.post(
             IGDB_GENRES,
-            headers=self._headers(),
+            headers=self._igdb_headers(),
             data="fields id,name; limit 500;",
         )
         r.raise_for_status()
         return {g["id"]: g["name"] for g in r.json()}
 
+    def probe_games_endpoint(self) -> None:
+        """
+        Minimal POST to /games to verify endpoint access (e.g. some apps get 403 on /games but not /genres).
+        Raises on non-2xx. Use at startup to fail fast with a clear message.
+        """
+        r = requests.post(
+            IGDB_GAMES,
+            headers=self._igdb_headers(),
+            data="fields id,name; limit 1;",
+        )
+        r.raise_for_status()
+
     def get_popular_games(self, limit: int = 500) -> list[dict[str, Any]]:
         """
         Fetch popular games (by total_rating_count) with genres and screenshot URLs.
         Returns list of dicts: id, name, genres (list[str]), first_release_date (int|None), screenshot_urls (list[str]).
+        IGDB allows max 500 items per request; higher values can cause 403.
         """
+        limit = min(limit, PAGE_SIZE)
         genre_map = self.get_genre_map()
         time.sleep(RATE_LIMIT_DELAY)
 
@@ -79,7 +101,7 @@ class IGDBClient:
             f"limit {limit}; "
             "where screenshots != null & first_release_date != null;"
         )
-        r = requests.post(IGDB_GAMES, headers=self._headers(), data=body)
+        r = requests.post(IGDB_GAMES, headers=self._igdb_headers(), data=body)
         r.raise_for_status()
         games_raw = r.json()
         if not games_raw:
@@ -99,7 +121,7 @@ class IGDBClient:
             ids_str = ",".join(str(x) for x in batch)
             r2 = requests.post(
                 IGDB_SCREENSHOTS,
-                headers=self._headers(),
+                headers=self._igdb_headers(),
                 data=f"fields image_id; where id = ({ids_str});",
             )
             r2.raise_for_status()
