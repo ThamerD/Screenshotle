@@ -1,0 +1,100 @@
+"""
+Gameplay logic: pick random game, map release date to Generation, session state, call clients for hints.
+
+Depends on app.models and app.clients. No HTTP or session storage; callers (routes) own session.
+"""
+
+import random
+from datetime import datetime, timezone
+from typing import Any
+
+from app.clients import IGDBClient, OpenAIClient
+from app.models import Game, GameSession, Generation, HintRequest, HintResult
+
+
+# Console generations from Wikipedia: History of video game consoles § Home console history
+# https://en.wikipedia.org/wiki/History_of_video_game_consoles#Console_generations
+# Each entry: (year_start_inclusive, year_end_inclusive, label, primary_consoles)
+CONSOLE_GENERATIONS: list[tuple[int, int, str, tuple[str, ...]]] = [
+    (1972, 1975, "First generation (1972–1983)", ("Magnavox Odyssey", "Atari Pong", "Coleco Telstar series")),
+    (1976, 1982, "Second generation (1976–1992)", ("Fairchild Channel F", "Atari 2600", "Odyssey 2", "Intellivision", "ColecoVision")),
+    (1983, 1986, "Third generation / 8-bit (1983–2003)", ("Nintendo Entertainment System (NES)", "Sega Master System", "Atari 7800")),
+    (1987, 1992, "Fourth generation / 16-bit (1987–2004)", ("TurboGrafx-16", "Sega Genesis", "Neo Geo", "Super NES")),
+    (1993, 1997, "Fifth generation / 32-bit (1993–2006)", ("3DO", "Atari Jaguar", "Sega Saturn", "PlayStation", "Nintendo 64")),
+    (1998, 2004, "Sixth generation (1998–2013)", ("Dreamcast", "PlayStation 2", "GameCube", "Xbox")),
+    (2005, 2011, "Seventh generation (2005–2017)", ("Xbox 360", "PlayStation 3", "Wii")),
+    (2012, 2019, "Eighth generation (2012–present)", ("Wii U", "PlayStation 4", "Xbox One", "Nintendo Switch")),
+    (2020, 9999, "Ninth generation (2020–present)", ("Xbox Series X/S", "PlayStation 5")),
+]
+
+
+def get_generation_from_release_date(first_release_date: int | None) -> Generation | None:
+    """Map Unix timestamp to console generation (label + primary_consoles). Returns None if no date."""
+    if first_release_date is None:
+        return None
+    year = datetime.fromtimestamp(first_release_date, tz=timezone.utc).year
+    for start, end, label, consoles in CONSOLE_GENERATIONS:
+        if start <= year <= end:
+            return Generation(label=label, primary_consoles=consoles)
+    return None
+
+
+def raw_dict_to_game(raw: dict[str, Any]) -> Game:
+    """
+    Convert a game dict from IGDBClient.get_popular_games into app.models.Game.
+    Expects keys: id, name, genres (list[str]), first_release_date (int|None), screenshot_urls (list[str]).
+    """
+    first_release_date = raw.get("first_release_date")
+    generation = get_generation_from_release_date(first_release_date)
+    return Game(
+        id=raw["id"],
+        name=raw["name"],
+        genres=raw.get("genres") or [],
+        generation=generation,
+        screenshot_urls=raw.get("screenshot_urls") or [],
+    )
+
+
+class GameService:
+    """
+    Gameplay service: fetch game pool, start a round, resolve current screenshot, submit guess for hints.
+    Uses IGDBClient for games and OpenAIClient for guess check + hint text.
+    """
+
+    def __init__(self, igdb_client: IGDBClient, openai_client: OpenAIClient) -> None:
+        self._igdb = igdb_client
+        self._openai = openai_client
+
+    def get_game_pool(self, limit: int = 500) -> list[Game]:
+        """Fetch popular games from IGDB and return as list of Game (with generation from release date)."""
+        raw_list = self._igdb.get_popular_games(limit=limit)
+        return [raw_dict_to_game(r) for r in raw_list]
+
+    def start_new_game(self, pool: list[Game]) -> GameSession:
+        """Pick a random game from the pool and return a new GameSession (screenshot_index=0, attempt_count=0)."""
+        if not pool:
+            return GameSession(current_game=None, screenshot_index=0, attempt_count=0)
+        game = random.choice(pool)
+        return GameSession(current_game=game, screenshot_index=0, attempt_count=0)
+
+    def get_current_screenshot_url(self, session: GameSession) -> str | None:
+        """Return the URL of the current screenshot for the session's game, or None if no game or no URLs."""
+        if session.current_game is None or not session.current_game.screenshot_urls:
+            return None
+        idx = min(session.screenshot_index, len(session.current_game.screenshot_urls) - 1)
+        return session.current_game.screenshot_urls[idx]
+
+    def submit_guess(self, session: GameSession, guess: str) -> HintResult:
+        """
+        Check the guess against the correct game and return HintResult (correct flag + optional hint).
+        Does not mutate session; caller should update attempt_count and screenshot_index.
+        """
+        if session.current_game is None:
+            return HintResult(correct=False, hint_text=None)
+        request = HintRequest(
+            guess=guess.strip(),
+            correct_game_name=session.current_game.name,
+            generation=session.current_game.generation,
+            genres=session.current_game.genres,
+        )
+        return self._openai.check_guess_and_get_hint(request)
