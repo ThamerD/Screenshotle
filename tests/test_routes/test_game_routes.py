@@ -2,8 +2,6 @@
 Unit tests for app.routes.game (mocked GameService and session).
 """
 
-import time
-
 import pytest
 from unittest.mock import MagicMock
 
@@ -11,7 +9,7 @@ from fastapi.testclient import TestClient
 
 from app.main import create_app
 from app.models import Game, GameSession, Generation, HintResult
-from app.routes.game import GAME_POOL_CACHE_MAX_AGE_SECONDS
+from app.routes.game import _pst_date_string
 
 
 @pytest.fixture
@@ -102,12 +100,13 @@ def test_play_again_redirects_to_new_game(client, mock_game_service, sample_game
 
 
 def test_new_game_uses_cache_when_fresh(app_with_mock_service, client, mock_game_service, sample_game):
-    """When game_pool_cache is set and younger than 7 days, /new-game does not call get_game_pool."""
+    """When game_pool_cache is set for the current PST day, /new-game does not call get_game_pool."""
     mock_game_service.start_new_game.return_value = GameSession(
         current_game=sample_game, screenshot_index=0, attempt_count=0
     )
     mock_game_service.get_current_screenshot_url.return_value = "https://img.jpg"
-    app_with_mock_service.state.game_pool_cache = ([sample_game], time.time() - 10)
+    today_pst = _pst_date_string()
+    app_with_mock_service.state.game_pool_cache = ([sample_game], today_pst)
     response = client.get("/new-game", follow_redirects=False)
     assert response.status_code == 200
     mock_game_service.get_game_pool.assert_not_called()
@@ -115,18 +114,16 @@ def test_new_game_uses_cache_when_fresh(app_with_mock_service, client, mock_game
 
 
 def test_new_game_refetches_when_cache_stale(app_with_mock_service, client, mock_game_service, sample_game):
-    """When game_pool_cache is older than 7 days, /new-game calls get_game_pool and updates cache."""
+    """When game_pool_cache is for a different PST day, /new-game calls get_game_pool and updates cache."""
     mock_game_service.get_game_pool.return_value = [sample_game]
     mock_game_service.start_new_game.return_value = GameSession(
         current_game=sample_game, screenshot_index=0, attempt_count=0
     )
     mock_game_service.get_current_screenshot_url.return_value = "https://img.jpg"
-    stale_fetched_at = time.time() - (8 * 24 * 3600)
-    app_with_mock_service.state.game_pool_cache = ([sample_game], stale_fetched_at)
+    app_with_mock_service.state.game_pool_cache = ([sample_game], "2000-01-01")
     response = client.get("/new-game", follow_redirects=False)
     assert response.status_code == 200
     mock_game_service.get_game_pool.assert_called_once()
-    pool, fetched_at = app_with_mock_service.state.game_pool_cache
+    pool, cached_date = app_with_mock_service.state.game_pool_cache
     assert pool == [sample_game]
-    assert fetched_at > stale_fetched_at
-    assert (time.time() - fetched_at) < GAME_POOL_CACHE_MAX_AGE_SECONDS
+    assert cached_date == _pst_date_string()
