@@ -24,7 +24,6 @@ class Game:
 
     id: int
     name: str
-    slug: str
     genres: list[str]
     generation: Generation | None
     screenshot_urls: list[str]

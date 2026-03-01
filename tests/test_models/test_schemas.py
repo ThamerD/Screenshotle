@@ -24,14 +24,12 @@ def test_game_holds_required_fields():
     game = Game(
         id=123,
         name="Some Game",
-        slug="some-game",
         genres=["Action", "RPG"],
         generation=gen,
         screenshot_urls=["https://example.com/1.jpg", "https://example.com/2.jpg"],
     )
     assert game.id == 123
     assert game.name == "Some Game"
-    assert game.slug == "some-game"
     assert game.genres == ["Action", "RPG"]
     assert game.generation is gen
     assert len(game.screenshot_urls) == 2
@@ -41,7 +39,6 @@ def test_game_generation_can_be_none():
     game = Game(
         id=1,
         name="Unknown Era",
-        slug="unknown",
         genres=[],
         generation=None,
         screenshot_urls=[],
@@ -57,7 +54,7 @@ def test_game_session_defaults():
 
 
 def test_game_session_with_game():
-    game = Game(1, "Test", "test", [], None, ["url1"])
+    game = Game(1, "Test", [], None, ["url1"])
     session = GameSession(current_game=game, screenshot_index=1, attempt_count=2)
     assert session.current_game is game
     assert session.screenshot_index == 1
