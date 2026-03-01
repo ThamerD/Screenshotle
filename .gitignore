@@ -209,5 +209,8 @@ __marimo__/
 # Specstory
 .specstory/
 
+# Debug output (game pool dump for verification)
+popular_games.json
+
 # Vscode
 .vscode/

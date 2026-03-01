@@ -4,9 +4,11 @@ Gameplay logic: pick random game, map release date to Generation, session state,
 Depends on app.models and app.clients. No HTTP or session storage; callers (routes) own session.
 """
 
+import json
 import re
 import random
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any
 
 from app.clients import IGDBClient, OpenAIClient
@@ -40,6 +42,21 @@ def get_generation_from_release_date(first_release_date: int | None) -> Generati
     return None
 
 
+def _write_pool_debug(raw_list: list[dict[str, Any]]) -> None:
+    """Write the raw popular games list to popular_games.json in the project root, sorted by release date."""
+    try:
+        path = Path(__file__).resolve().parent.parent.parent / "popular_games.json"
+        # Sort by first_release_date ascending (oldest first); treat None as 0 so null dates sort first
+        sorted_list = sorted(
+            raw_list,
+            key=lambda g: g.get("first_release_date") or 0,
+        )
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(sorted_list, f, indent=2, ensure_ascii=False)
+    except OSError:
+        pass
+
+
 def raw_dict_to_game(raw: dict[str, Any]) -> Game:
     """
     Convert a game dict from IGDBClient.get_popular_games into app.models.Game.
@@ -69,6 +86,8 @@ class GameService:
     def get_game_pool(self, limit: int = 500) -> list[Game]:
         """Fetch popular games from IGDB and return as list of Game (with generation from release date)."""
         raw_list = self._igdb.get_popular_games(limit=limit)
+        # Write full list to JSON for verification (id, name, genres, first_release_date, screenshot_urls)
+        _write_pool_debug(raw_list)
         return [raw_dict_to_game(r) for r in raw_list]
 
     def start_new_game(self, pool: list[Game]) -> GameSession:
