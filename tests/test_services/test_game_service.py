@@ -144,6 +144,16 @@ def test_start_new_game_picks_from_pool_and_resets_session(game_service, sample_
     assert session.attempt_count == 0
 
 
+def test_start_new_game_exclude_ids_avoids_recent_and_falls_back(game_service, sample_pool):
+    """When exclude_ids is set, pick from non-excluded; when all excluded, fall back to full pool."""
+    session = game_service.start_new_game(sample_pool, exclude_ids={1})
+    assert session.current_game is not None
+    assert session.current_game.id == 2  # only Game Two (id 2) is not excluded
+    session2 = game_service.start_new_game(sample_pool, exclude_ids={1, 2})
+    assert session2.current_game is not None  # fallback to full pool when no candidates
+    assert session2.current_game.id in (1, 2)
+
+
 def test_get_current_screenshot_url_none_when_no_game(game_service):
     session = GameSession(current_game=None, screenshot_index=0, attempt_count=0)
     assert game_service.get_current_screenshot_url(session) is None

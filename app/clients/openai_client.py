@@ -33,7 +33,8 @@ class OpenAIClient:
 
         system = (
             "You judge whether a player's guess matches the correct video game title (fuzzy match: same game, alternate titles, common abbreviations). "
-            "Reply with exactly two lines: line 1 is either CORRECT or WRONG. If WRONG, line 2 is a single short hint (1 sentence) using only the game's generation/era and genre—no spoilers, no game name."
+            "Reply with exactly two lines: line 1 is either CORRECT or WRONG. If WRONG, line 2 is a single short hint (1 sentence). "
+            "The hint must be interesting and specific to this game when possible: use the game's generation/era and genre as facts, but also add one distinctive detail—setting, theme, a well-known mechanic, studio, or legacy—that makes the hint memorable and unique. No spoilers, no game name."
         )
         user = (
             f"Correct game: {request.correct_game_name}. "

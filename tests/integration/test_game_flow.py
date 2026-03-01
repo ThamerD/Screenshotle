@@ -43,13 +43,14 @@ def client(mock_service):
 
 
 def test_full_flow_start_wrong_guess_then_hint(client, mock_service):
-    # Start new game
+    # Start new game (renders game page directly, no redirect)
     r1 = client.get("/new-game", follow_redirects=False)
-    assert r1.status_code == 302
+    assert r1.status_code == 200
     mock_service.get_game_pool.assert_called_once()
     mock_service.start_new_game.assert_called_once()
+    assert "img1.jpg" in r1.text
 
-    # Game page shows first screenshot
+    # Session persists: GET / shows same game
     r2 = client.get("/")
     assert r2.status_code == 200
     assert "img1.jpg" in r2.text
