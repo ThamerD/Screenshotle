@@ -10,6 +10,8 @@ from app.models.schemas import (
     Generation,
     HintRequest,
     HintResult,
+    dict_to_game_session,
+    game_session_to_dict,
 )
 
 __all__ = [
@@ -18,4 +20,6 @@ __all__ = [
     "Generation",
     "HintRequest",
     "HintResult",
+    "dict_to_game_session",
+    "game_session_to_dict",
 ]

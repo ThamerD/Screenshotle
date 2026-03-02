@@ -12,8 +12,7 @@ from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 from pathlib import Path
 
-from app.models import GameSession
-from app.routes.session_serializer import dict_to_game_session, game_session_to_dict
+from app.models import GameSession, dict_to_game_session, game_session_to_dict
 
 # Max wrong guesses before game over (then show next screenshot; repeat until correct or this many attempts)
 MAX_ATTEMPTS = 5
@@ -22,6 +21,16 @@ MAX_ATTEMPTS = 5
 PST = ZoneInfo("America/Los_Angeles")
 # IGDB allows max 500 items per request (api-docs.igdb.com)
 GAME_POOL_LIMIT = 500
+
+# Session keys we clear when starting a new game or when consuming flash data
+SESSION_KEYS_TO_CLEAR = [
+    "game_session", "message", "answer",
+    "last_hint", "last_genre_matches", "last_genre_mismatches",
+    "last_generation_text", "last_generation_matched",
+]
+FLASH_KEYS = [k for k in SESSION_KEYS_TO_CLEAR if k != "game_session"]
+# Hint-only keys (cleared on skip-guess so we don't show previous hint)
+HINT_FLASH_KEYS = ["last_hint", "last_genre_matches", "last_genre_mismatches", "last_generation_text", "last_generation_matched"]
 
 
 def _pst_date_string() -> str:
@@ -64,6 +73,9 @@ _NO_GAME_HTML = """<!DOCTYPE html>
 <h1>Screenshotle</h1>
 <p>Guess the video game from a screenshot.</p>
 <p><a href="/new-game" style="display:inline-block;padding:0.5rem 1rem;background:#333;color:#fff;text-decoration:none;border-radius:6px;">Start a new game</a></p>
+<footer style="margin-top:2.5rem;padding-top:1rem;border-top:1px solid #eee;color:#888;font-size:0.85rem;">
+Created by Thamer <a href="https://github.com/Thamer" target="_blank" rel="noopener noreferrer" aria-label="Thamer on GitHub" style="color:#888;display:inline-flex;align-items:center;"><svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z"/></svg></a>
+</footer>
 </body></html>"""
 
 
@@ -85,35 +97,20 @@ async def game_page(request: Request) -> Any:
     screenshot_url = service.get_current_screenshot_url(gs)
     if not screenshot_url:
         return HTMLResponse(_NO_GAME_HTML)
-    # Show last hint if present (from previous wrong guess)
-    last_hint = _session(request).pop("last_hint", None)
-    last_genre_matches = _session(request).pop("last_genre_matches", [])
-    last_genre_mismatches = _session(request).pop("last_genre_mismatches", [])
-    last_generation_text = _session(request).pop("last_generation_text", None)
-    last_generation_matched = _session(request).pop("last_generation_matched", False)
-    message = _session(request).pop("message", None)
-    answer = _session(request).pop("answer", None)
-    # Game names from pool for autofill (same pool the current game came from)
-    cache = getattr(request.app.state, "game_pool_cache", None)
-    pool = cache[0] if cache else []
-    game_names = [g.name for g in pool]
-    return templates.TemplateResponse(
+    # Consume flash data (show once)
+    flash = {k: _session(request).pop(k, None) for k in FLASH_KEYS}
+    return _render_game_page(
         request,
-        "game.html",
-        {
-            "screenshot_url": screenshot_url,
-            "hint_text": last_hint,
-            "genre_matches": last_genre_matches,
-            "genre_mismatches": last_genre_mismatches,
-            "generation_text": last_generation_text,
-            "generation_matched": last_generation_matched,
-            "message": message,
-            "answer": answer,
-            "attempt_count": gs.attempt_count,
-            "max_attempts": MAX_ATTEMPTS,
-            "show_guess_form": message is None,
-            "game_names": game_names,
-        },
+        gs,
+        screenshot_url=screenshot_url,
+        hint_text=flash.get("last_hint"),
+        genre_matches=flash.get("last_genre_matches") or [],
+        genre_mismatches=flash.get("last_genre_mismatches") or [],
+        generation_text=flash.get("last_generation_text"),
+        generation_matched=flash.get("last_generation_matched") or False,
+        message=flash.get("message"),
+        answer=flash.get("answer"),
+        show_guess_form=flash.get("message") is None,
     )
 
 
@@ -182,30 +179,10 @@ async def new_game(request: Request) -> Any:
             status_code=503,
         )
     _save_session(request, gs)
-    # Render game page directly (no redirect) so one click always shows the game; avoids cookie/redirect issues
     screenshot_url = service.get_current_screenshot_url(gs)
     if not screenshot_url:
-        # Should not happen if pool only has games with screenshots; fallback to GET / to show game
         return RedirectResponse(url="/", status_code=302)
-    game_names = [g.name for g in pool]
-    return templates.TemplateResponse(
-        request,
-        "game.html",
-        {
-            "screenshot_url": screenshot_url,
-            "hint_text": None,
-            "genre_matches": [],
-            "genre_mismatches": [],
-            "generation_text": None,
-            "generation_matched": False,
-            "message": None,
-            "answer": None,
-            "attempt_count": gs.attempt_count,
-            "max_attempts": MAX_ATTEMPTS,
-            "show_guess_form": True,
-            "game_names": game_names,
-        },
-    )
+    return _render_game_page(request, gs, screenshot_url=screenshot_url, show_guess_form=True)
 
 
 @game_router.post("/guess", response_class=HTMLResponse)
@@ -230,28 +207,13 @@ async def submit_guess(request: Request) -> Any:
         _session(request)["answer"] = gs.current_game.name
         _save_session(request, gs)
         screenshot_url = service.get_current_screenshot_url(gs)
-        cache = getattr(request.app.state, "game_pool_cache", None)
-        pool = cache[0] if cache else []
-        game_names = [g.name for g in pool]
-        return templates.TemplateResponse(
-            request,
-            "game.html",
-            {
-                "screenshot_url": screenshot_url,
-                "hint_text": None,
-                "genre_matches": [],
-                "genre_mismatches": [],
-                "generation_text": None,
-                "generation_matched": False,
-                "message": "You win!",
-                "answer": gs.current_game.name,
-                "attempt_count": gs.attempt_count,
-                "max_attempts": MAX_ATTEMPTS,
-                "show_guess_form": False,
-                "game_names": game_names,
-            },
+        return _render_game_page(
+            request, gs,
+            screenshot_url=screenshot_url,
+            message="You win!",
+            answer=gs.current_game.name,
+            show_guess_form=False,
         )
-    # Wrong: store hint and match hints, increment attempt and screenshot index
     _session(request)["last_hint"] = result.hint_text
     _session(request)["last_genre_matches"] = result.genre_matches
     _session(request)["last_genre_mismatches"] = result.genre_mismatches
@@ -260,59 +222,37 @@ async def submit_guess(request: Request) -> Any:
     gs.attempt_count += 1
     gs.screenshot_index += 1
     _save_session(request, gs)
+    screenshot_url = service.get_current_screenshot_url(gs)
     if gs.attempt_count >= MAX_ATTEMPTS:
         _session(request)["message"] = "Game over."
         _session(request)["answer"] = gs.current_game.name
-        screenshot_url = service.get_current_screenshot_url(gs)
-        cache = getattr(request.app.state, "game_pool_cache", None)
-        pool = cache[0] if cache else []
-        game_names = [g.name for g in pool]
-        return templates.TemplateResponse(
-            request,
-            "game.html",
-            {
-                "screenshot_url": screenshot_url,
-                "hint_text": result.hint_text,
-                "genre_matches": result.genre_matches,
-                "genre_mismatches": result.genre_mismatches,
-                "generation_text": result.generation_text,
-                "generation_matched": result.generation_matched,
-                "message": "Game over.",
-                "answer": gs.current_game.name,
-                "attempt_count": gs.attempt_count,
-                "max_attempts": MAX_ATTEMPTS,
-                "show_guess_form": False,
-                "game_names": game_names,
-            },
+        return _render_game_page(
+            request, gs,
+            screenshot_url=screenshot_url,
+            hint_text=result.hint_text,
+            genre_matches=result.genre_matches,
+            genre_mismatches=result.genre_mismatches,
+            generation_text=result.generation_text,
+            generation_matched=result.generation_matched,
+            message="Game over.",
+            answer=gs.current_game.name,
+            show_guess_form=False,
         )
-    screenshot_url = service.get_current_screenshot_url(gs)
-    cache = getattr(request.app.state, "game_pool_cache", None)
-    pool = cache[0] if cache else []
-    game_names = [g.name for g in pool]
-    return templates.TemplateResponse(
-        request,
-        "game.html",
-        {
-            "screenshot_url": screenshot_url,
-            "hint_text": result.hint_text,
-            "genre_matches": result.genre_matches,
-            "genre_mismatches": result.genre_mismatches,
-            "generation_text": result.generation_text,
-            "generation_matched": result.generation_matched,
-            "message": None,
-            "answer": None,
-            "attempt_count": gs.attempt_count,
-            "max_attempts": MAX_ATTEMPTS,
-            "show_guess_form": True,
-            "game_names": game_names,
-        },
+    return _render_game_page(
+        request, gs,
+        screenshot_url=screenshot_url,
+        hint_text=result.hint_text,
+        genre_matches=result.genre_matches,
+        genre_mismatches=result.genre_mismatches,
+        generation_text=result.generation_text,
+        generation_matched=result.generation_matched,
+        show_guess_form=True,
     )
 
 
 def _render_game_page(
     request: Request,
     gs: GameSession,
-    service: Any,
     *,
     screenshot_url: str | None,
     hint_text: str | None = None,
@@ -360,14 +300,7 @@ async def skip_guess(request: Request) -> Any:
     gs = _get_session(request)
     if gs.current_game is None:
         return RedirectResponse(url="/new-game", status_code=302)
-    # Clear any previous wrong-guess hint so we don't show it after skip
-    for key in (
-        "last_hint",
-        "last_genre_matches",
-        "last_genre_mismatches",
-        "last_generation_text",
-        "last_generation_matched",
-    ):
+    for key in HINT_FLASH_KEYS:
         _session(request).pop(key, None)
     gs.attempt_count += 1
     gs.screenshot_index += 1
@@ -377,18 +310,14 @@ async def skip_guess(request: Request) -> Any:
         _session(request)["message"] = "Game over."
         _session(request)["answer"] = gs.current_game.name
         return _render_game_page(
-            request,
-            gs,
-            service,
+            request, gs,
             screenshot_url=screenshot_url,
             message="Game over.",
             answer=gs.current_game.name,
             show_guess_form=False,
         )
     return _render_game_page(
-        request,
-        gs,
-        service,
+        request, gs,
         screenshot_url=screenshot_url,
         show_guess_form=True,
     )
@@ -397,16 +326,7 @@ async def skip_guess(request: Request) -> Any:
 @game_router.get("/skip-game")
 async def skip_game(request: Request) -> Any:
     """Skip current game and start a new one."""
-    for key in (
-        "game_session",
-        "message",
-        "answer",
-        "last_hint",
-        "last_genre_matches",
-        "last_genre_mismatches",
-        "last_generation_text",
-        "last_generation_matched",
-    ):
+    for key in SESSION_KEYS_TO_CLEAR:
         _session(request).pop(key, None)
     return RedirectResponse(url="/new-game", status_code=302)
 
@@ -414,15 +334,6 @@ async def skip_game(request: Request) -> Any:
 @game_router.get("/play-again")
 async def play_again(request: Request) -> Any:
     """Clear game session and start a new game."""
-    for key in (
-        "game_session",
-        "message",
-        "answer",
-        "last_hint",
-        "last_genre_matches",
-        "last_genre_mismatches",
-        "last_generation_text",
-        "last_generation_matched",
-    ):
+    for key in SESSION_KEYS_TO_CLEAR:
         _session(request).pop(key, None)
     return RedirectResponse(url="/new-game", status_code=302)
