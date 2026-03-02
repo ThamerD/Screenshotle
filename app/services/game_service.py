@@ -5,6 +5,7 @@ Depends on app.models and app.clients. No HTTP or session storage; callers (rout
 """
 
 import json
+import os
 import re
 import random
 from datetime import datetime, timezone
@@ -43,7 +44,9 @@ def get_generation_from_release_date(first_release_date: int | None) -> Generati
 
 
 def _write_pool_debug(raw_list: list[dict[str, Any]]) -> None:
-    """Write the raw popular games list to popular_games.json in the project root, sorted by release date."""
+    """When DEBUG=1, write the raw popular games list to popular_games.json for verification."""
+    if os.environ.get("DEBUG", "").lower() not in ("1", "true", "yes"):
+        return
     try:
         path = Path(__file__).resolve().parent.parent.parent / "popular_games.json"
         # Sort by first_release_date ascending (oldest first); treat None as 0 so null dates sort first

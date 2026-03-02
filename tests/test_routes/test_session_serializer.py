@@ -1,11 +1,10 @@
 """
-Unit tests for app.routes.session_serializer (GameSession roundtrip).
+Unit tests for GameSession serialization (app.models roundtrip).
 """
 
 import pytest
 
-from app.models import Game, GameSession, Generation
-from app.routes.session_serializer import game_session_to_dict, dict_to_game_session
+from app.models import Game, GameSession, Generation, game_session_to_dict, dict_to_game_session
 
 
 def test_roundtrip_empty_session():
